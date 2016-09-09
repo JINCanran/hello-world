@@ -1,0 +1,659 @@
+Enter file contents here/*******************************************************************************
+Copyright (c) 2016 IBM Corporation and other Contributors.
+
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and limitations under the License.
+
+
+Contributors:
+
+Sumabala Nair - Initial Contribution
+Kim Letkeman - Initial Contribution
+Sumabala Nair - Updated for hyperledger May 2016
+Sumabala Nair - Partial updates added May 2016
+******************************************************************************/
+//SN: March 2016
+
+// IoT Blockchain Simple Smart Contract v 1.0
+
+// This is a simple contract that creates a CRUD interface to
+// create, read, update and delete an asset
+
+package main
+
+import (
+    "encoding/json"
+    "errors"
+    "fmt"
+    "strings"
+    "reflect"
+    "github.com/hyperledger/fabric/core/chaincode/shim"
+    "time"
+)
+
+
+// SimpleChaincode example simple Chaincode implementation
+type SimpleChaincode struct {
+}
+
+const CONTRACTSTATEKEY string = "ContractStateKey"
+// store contract state - only version in this example
+const MYVERSION string = "1.0"
+
+// ************************************
+// asset and contract state
+// ************************************
+
+type ContractState struct {
+    Version      string                        `json:"version"`
+}
+
+type CustomerState struct {
+    CusID        *string     `json:"cusID,omitempty"`
+    Name         *string     `json:"name,omitempty"`
+    Wallet       *float64    `json:"wallet,omitempty"`
+    UsingRoomId  *string     `json:"usingroomID,omitempty"`
+    CheckInTime  *int64     `json:"ckintime,omitempty"`
+
+}
+
+
+type RoomState struct {
+    RoomID        *string       `json:"roomID,omitempty"`        // all assets must have an ID, primary key of contract
+    Name          *string       `json:"name,omitempty"`        // room name
+    Rent          *float64          `json:"rent,omitempty"`        // rent fee
+    Wallet        *float64       `json:"wallet,omitempty"`
+    State         *string       `json:"state,omitempty"`        // 2016/09/05 this argument not used yet
+}
+
+var contractState = ContractState{MYVERSION}
+
+
+// ************************************
+// deploy callback mode
+// ************************************
+func (t *SimpleChaincode) Init(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
+    var stateArg ContractState
+    var err error
+    if len(args) != 1 {
+        return nil, errors.New("init expects one argument, a JSON string with tagged version string")
+    }
+    err = json.Unmarshal([]byte(args[0]), &stateArg)
+    if err != nil {
+        return nil, errors.New("Version argument unmarshal failed: " + fmt.Sprint(err))
+    }
+    if stateArg.Version != MYVERSION {
+        return nil, errors.New("Contract version " + MYVERSION + " must match version argument: " + stateArg.Version)
+    }
+    contractStateJSON, err := json.Marshal(stateArg)
+    if err != nil {
+        return nil, errors.New("Marshal failed for contract state" + fmt.Sprint(err))
+    }
+    err = stub.PutState(CONTRACTSTATEKEY, contractStateJSON)
+    if err != nil {
+        return nil, errors.New("Contract state failed PUT to ledger: " + fmt.Sprint(err))
+    }
+    return nil, nil
+}
+
+// ************************************
+// deploy and invoke callback mode
+// ************************************
+func (t *SimpleChaincode) Invoke(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
+    // Handle different functions
+    if function == "addRoom" {
+        // add new room
+        return t.addRoom(stub, args)
+    } else if function == "updateRoom" {
+        // update room by ID
+        return t.updateRoom(stub, args)
+    } else if function == "deleteRoom" {
+        // Deletes an room by ID from the ledger
+        return t.deleteRoom(stub, args)
+    }else if function == "addCustomer" {
+        // Deletes an room by ID from the ledger
+        return t.addCustomer(stub, args)
+    }else if function == "charge" {
+        // charge
+        return t.charge(stub, args)
+    }else if function == "checkIn" {
+        // checkIn
+        return t.checkIn(stub, args)
+    }else if function == "checkOut" {
+        // checkOut
+        return t.checkOut(stub, args)
+  }
+    return nil, errors.New("Received unknown invocation: " + function)
+}
+
+// ************************************
+// query callback mode
+// ************************************
+func (t *SimpleChaincode) Query(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
+    // Handle different functions
+    // if function == "queryVancant" {
+    //     // gets the state for an assetID as a JSON struct
+    //     return t.queryVancant(stub, args)
+    // }else
+    if function == "queryRoomById" {
+        return t.queryRoomById(stub, args)
+    }else if function == "queryCusById" {
+        return t.queryCusById(stub, args)
+    }
+    return nil, errors.New("Received unknown query: " + function)
+}
+
+/**********main implementation *************/
+
+func main() {
+    err := shim.Start(new(SimpleChaincode))
+    if err != nil {
+        fmt.Printf("Error starting Simple Chaincode: %s", err)
+    }
+}
+
+/*****************ASSET CRUD INTERFACE starts here************/
+
+/****************** 'deploy' methods *****************/
+
+/******************** createAsset ********************/
+
+func (t *SimpleChaincode) addRoom(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
+    _,erval:=t. addOrUpdateRoom(stub, args)
+    return nil, erval
+}
+
+func (t *SimpleChaincode) addCustomer(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
+  var cusID string                 // cus ID                    // used when looking in map
+  var err error
+  var stateIn CustomerState
+
+  stateIn, err = t.validateInputCus(args)
+  if err != nil {
+      return nil, err
+  }
+  cusID = *stateIn.CusID
+  // Partial updates introduced here
+  // Check if asset record existed in stub
+  cusBytes, err:= stub.GetState(cusID)
+  if len(cusBytes)!=0{
+
+      err = errors.New("ID existed!")
+      return nil, err
+  }
+
+    _,erval:=t. addOrUpdateCustomer(stub, args)
+    return nil, erval
+}
+//******************** updateAsset ********************/
+
+func (t *SimpleChaincode) updateRoom(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
+     _,erval:=t. addOrUpdateRoom(stub, args)
+    return nil, erval
+}
+/******************** charge ********************/
+func (t *SimpleChaincode) charge(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
+  var cusID string // customer ID
+  var err error
+  var stateIn CustomerState
+  var stateOld CustomerState
+
+  // validate input data for number of args, Unmarshaling to asset state and obtain asset id
+  stateIn, err = t.validateInputCus(args)
+  if err != nil {
+      return nil, err
+  }
+  cusID = *stateIn.CusID
+  // Get the state from the ledger
+  cusBytes, err:= stub.GetState(cusID)
+  if err != nil  || len(cusBytes) ==0{
+    err = errors.New("Unable to get customer state from ledger")
+    return nil, err
+  }
+  err = json.Unmarshal(cusBytes, &stateOld)
+  if err != nil {
+    err = errors.New("Unable to unmarshal state data obtained from ledger")
+    return nil, err
+  }
+  *stateOld.Wallet =  *stateOld.Wallet + *stateIn.Wallet
+  stateJSON, err := json.Marshal(stateOld)
+  if err != nil {
+      return nil, errors.New("Marshal failed for contract state" + fmt.Sprint(err))
+  }
+  // Get existing state from the stub
+  // Write the new cus to the ledger
+  err = stub.PutState(cusID, stateJSON)
+  if err != nil {
+      err = errors.New("PUT ledger state failed: "+ fmt.Sprint(err))
+      return nil, err
+  }
+  return nil, nil
+}
+
+
+/******************** checkIn ********************/
+func (t *SimpleChaincode) checkIn(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
+  var cusID string // customer ID
+  var err error
+  var stateIn CustomerState
+  var stateOld CustomerState
+
+  // validate input data for number of args, Unmarshaling to asset state and obtain asset id
+  stateIn, err = t.validateInputCus(args)
+  if err != nil {
+      return nil, err
+  }
+  cusID = *stateIn.CusID
+  // Get the state from the ledger
+  cusBytes, err:= stub.GetState(cusID)
+  if err != nil  || len(cusBytes) ==0{
+    err = errors.New("Unable to get customer state from ledger")
+    return nil, err
+  }
+  err = json.Unmarshal(cusBytes, &stateOld)
+  if err != nil {
+    err = errors.New("Unable to unmarshal state data obtained from ledger")
+    return nil, err
+  }
+
+
+  *stateOld.CheckInTime =  time.Now().Unix()
+  *stateOld.UsingRoomId = *stateIn.UsingRoomId  
+
+  stateJSON, err := json.Marshal(stateOld)
+  if err != nil {
+      return nil, errors.New("Marshal failed for contract state" + fmt.Sprint(err))
+  }
+  // Get existing state from the stub
+  // Write the new cus to the ledger
+  err = stub.PutState(cusID, stateJSON)
+  if err != nil {
+      err = errors.New("PUT ledger state failed: "+ fmt.Sprint(err))
+      return nil, err
+  }
+  return nil, nil
+}
+
+
+/******************** checkOut ********************/
+func (t *SimpleChaincode) checkOut(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
+  var cusID string // customer ID
+  var err error
+  var stateIn CustomerState
+  var stateOld CustomerState
+  var stateRoom RoomState
+  // validate input data for number of args, Unmarshaling to asset state and obtain asset id
+  stateIn, err = t.validateInputCus(args)
+  if err != nil {
+      return nil, err
+  }
+  cusID = *stateIn.CusID
+  // Get the customer state from the ledger
+  cusBytes, err:= stub.GetState(cusID)
+  if err != nil  || len(cusBytes) ==0{
+    err = errors.New("Unable to get customer state from ledger")
+    return nil, err
+  }
+  err = json.Unmarshal(cusBytes, &stateOld)
+  if err != nil {
+    err = errors.New("Unable to unmarshal state data obtained from ledger")
+    return nil, err
+  }
+  // Get the room state from the ledger
+  roomBytes, err:= stub.GetState(*stateOld.UsingRoomId)
+  if err != nil  || len(roomBytes) ==0{
+    err = errors.New("Unable to get customer state from ledger")
+    return nil, err
+  }
+  err = json.Unmarshal(roomBytes, &stateRoom)
+  if err != nil {
+    err = errors.New("Unable to unmarshal state data obtained from ledger")
+    return nil, err
+  }
+
+  dura := (time.Now().Unix() - *stateOld.CheckInTime)%60  //minues
+  cost :=(*stateRoom.Rent) *  float64(dura)    //cost
+  *stateOld.Wallet = (*stateOld.Wallet)-cost
+  *stateRoom.Wallet = (*stateRoom.Wallet)+cost
+  *stateOld.UsingRoomId = "N/A"
+  *stateOld.CheckInTime =  -1
+  stateJSON, err := json.Marshal(stateOld)
+  if err != nil {
+      return nil, errors.New("Marshal failed for contract state" + fmt.Sprint(err))
+  }
+  stateJSONR, err := json.Marshal(stateRoom)
+  if err != nil {
+      return nil, errors.New("Marshal failed for contract state" + fmt.Sprint(err))
+  }
+  // Get existing state from the stub
+  // Write the new cus to the ledger
+  err = stub.PutState(cusID, stateJSON)
+  if err != nil {
+      err = errors.New("PUT ledger state failed: "+ fmt.Sprint(err))
+      return nil, err
+  }
+  // Write the new room to the ledger
+  err = stub.PutState(*stateRoom.RoomID, stateJSONR)
+  if err != nil {
+      err = errors.New("PUT ledger state failed: "+ fmt.Sprint(err))
+      return nil, err
+  }
+  return nil, nil
+}
+
+
+
+
+
+
+//******************** deleteRoom ********************/
+
+func (t *SimpleChaincode) deleteRoom(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
+    var roomID string // room ID
+    var err error
+    var stateIn RoomState
+
+    // validate input data for number of args, Unmarshaling to asset state and obtain asset id
+    stateIn, err = t.validateInput(args)
+    if err != nil {
+        return nil, err
+    }
+    roomID = *stateIn.RoomID
+    // Delete the key / asset from the ledger
+    err = stub.DelState(roomID)
+    if err != nil {
+        err = errors.New("DELSTATE failed! : "+ fmt.Sprint(err))
+       return nil, err
+    }
+    return nil, nil
+}
+//******************** deleteCus ********************/
+
+func (t *SimpleChaincode) deleteCus(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
+    var cusID string // room ID
+    var err error
+    var stateIn CustomerState
+
+    // validate input data for number of args, Unmarshaling to asset state and obtain asset id
+    stateIn, err = t.validateInputCus(args)
+    if err != nil {
+        return nil, err
+    }
+    cusID = *stateIn.CusID
+    // Delete the key / asset from the ledger
+    err = stub.DelState(cusID)
+    if err != nil {
+        err = errors.New("DELSTATE failed! : "+ fmt.Sprint(err))
+       return nil, err
+    }
+    return nil, nil
+}
+/******************* Query Methods ***************/
+
+//********************queryById********************/
+
+func (t *SimpleChaincode) queryRoomById(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
+    var roomID string // room ID
+    var err error
+    var state RoomState
+
+     // validate input data for number of args, Unmarshaling to room state and obtain room id
+    stateIn, err:= t.validateInput(args)
+    if err != nil {
+        return nil, errors.New("Room does not exist!")
+    }
+    roomID = *stateIn.RoomID
+        // Get the state from the ledger
+    roomBytes, err:= stub.GetState(roomID)
+    if err != nil  || len(roomBytes) ==0{
+        err = errors.New("Unable to get room state from ledger")
+        return nil, err
+    }
+    err = json.Unmarshal(roomBytes, &state)
+    if err != nil {
+         err = errors.New("Unable to unmarshal state data obtained from ledger")
+        return nil, err
+    }
+    return roomBytes, nil
+}
+
+func (t *SimpleChaincode) queryCusById(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
+    var cusID string // room ID
+    var err error
+    var state CustomerState
+
+     // validate input data for number of args, Unmarshaling to room state and obtain room id
+    stateIn, err:= t.validateInputCus(args)
+    if err != nil {
+        return nil, errors.New("Customer does not exist!")
+    }
+    cusID = *stateIn.CusID
+        // Get the state from the ledger
+    cusBytes, err:= stub.GetState(cusID)
+    if err != nil  || len(cusBytes) ==0{
+        err = errors.New("Unable to get customer state from ledger")
+        return nil, err
+    }
+    err = json.Unmarshal(cusBytes, &state)
+    if err != nil {
+         err = errors.New("Unable to unmarshal state data obtained from ledger")
+        return nil, err
+    }
+    return cusBytes, nil
+}
+// ************************************
+// validate input for room data : common method called by the CRUD functions
+// ************************************
+func (t *SimpleChaincode) validateInput(args []string) (stateIn RoomState, err error) {
+    var roomID string // room ID
+    var state RoomState = RoomState{} // The calling function is expecting an object of type AssetState
+
+    if len(args) !=1 {
+        err = errors.New("Incorrect number of arguments. Expecting a JSON strings with mandatory ID")
+        return state, err
+    }
+    jsonData:=args[0]
+    roomID = ""
+    stateJSON := []byte(jsonData)
+    err = json.Unmarshal(stateJSON, &stateIn)
+    if err != nil {
+        err = errors.New("Unable to unmarshal input JSON data")
+        return state, err
+        // state is an empty instance of asset state
+    }
+    // was roomID present?
+    // The nil check is required because the room id is a pointer.
+    // If no value comes in from the json input string, the values are set to nil
+
+    if stateIn.RoomID !=nil {
+        roomID = strings.TrimSpace(*stateIn.RoomID)
+        if roomID==""{
+            err = errors.New("ID not passed")
+            return state, err
+        }
+    } else {
+        err = errors.New("Room id is mandatory in the input JSON data")
+        return state, err
+    }
+
+
+    stateIn.RoomID = &roomID
+    return stateIn, nil
+}
+// ************************************
+// validate input for customer data : common method called by the CRUD functions
+// ************************************
+func (t *SimpleChaincode) validateInputCus(args []string) (stateIn CustomerState, err error) {
+    var cusID string // cus ID
+    var state CustomerState = CustomerState{} // The calling function is expecting an object of type AssetState
+
+    if len(args) !=1 {
+        err = errors.New("Incorrect number of arguments. Expecting a JSON strings with mandatory ID")
+        return state, err
+    }
+    jsonData:=args[0]
+    cusID = ""
+    stateJSON := []byte(jsonData)
+    err = json.Unmarshal(stateJSON, &stateIn)
+    if err != nil {
+        err = errors.New("Unable to unmarshal input JSON data")
+        return state, err
+        // state is an empty instance of asset state
+    }
+    // was roomID present?
+    // The nil check is required because the room id is a pointer.
+    // If no value comes in from the json input string, the values are set to nil
+
+    if stateIn.CusID !=nil {
+        cusID = strings.TrimSpace(*stateIn.CusID)
+        if cusID==""{
+            err = errors.New("ID not passed")
+            return state, err
+        }
+    } else {
+        err = errors.New("Customer id is mandatory in the input JSON data")
+        return state, err
+    }
+
+
+    stateIn.CusID = &cusID
+    return stateIn, nil
+}
+//******************** createOrUpdateRoom ********************/
+
+func (t *SimpleChaincode) addOrUpdateRoom(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
+    var roomID string                 // room ID                    // used when looking in map
+    var err error
+    var stateIn RoomState
+    var stateStub RoomState
+
+
+    // validate input data for number of args, Unmarshaling to room state and obtain room id
+
+    stateIn, err = t.validateInput(args)
+    if err != nil {
+        return nil, err
+    }
+    roomID = *stateIn.RoomID
+    // Partial updates introduced here
+    // Check if asset record existed in stub
+    roomBytes, err:= stub.GetState(roomID)
+    if err != nil || len(roomBytes)==0{
+        // This implies that this is a 'create' scenario
+         stateStub = stateIn // The record that goes into the stub is the one that cme in
+    } else {
+        // This is an update scenario
+        err = json.Unmarshal(roomBytes, &stateStub)
+        if err != nil {
+            err = errors.New("Unable to unmarshal JSON data from stub")
+            return nil, err
+            // state is an empty instance of asset state
+        }
+          // Merge partial state updates
+        stateStub, err =t.mergePartialState(stateStub,stateIn)
+        if err != nil {
+            err = errors.New("Unable to merge state")
+            return nil,err
+        }
+    }
+    stateJSON, err := json.Marshal(stateStub)
+    if err != nil {
+        return nil, errors.New("Marshal failed for contract state" + fmt.Sprint(err))
+    }
+    // Get existing state from the stub
+
+
+    // Write the new room to the ledger
+    err = stub.PutState(roomID, stateJSON)
+    if err != nil {
+        err = errors.New("PUT ledger state failed: "+ fmt.Sprint(err))
+        return nil, err
+    }
+    return nil, nil
+}
+//******************** AddOrUpdateCustomer ********************/.
+func (t *SimpleChaincode) addOrUpdateCustomer(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
+    var cusID string                 // cus ID                    // used when looking in map
+    var err error
+    var stateIn CustomerState
+    var stateStub CustomerState
+
+
+    // validate input data for number of args, Unmarshaling to  state and obtain  id
+
+    stateIn, err = t.validateInputCus(args)
+    if err != nil {
+        return nil, err
+    }
+    cusID = *stateIn.CusID
+    // Partial updates introduced here
+    // Check if asset record existed in stub
+    cusBytes, err:= stub.GetState(cusID)
+    if err != nil || len(cusBytes)==0{
+        // This implies that this is a 'create' scenario
+         stateStub = stateIn // The record that goes into the stub is the one that cme in
+    } else {
+        // This is an update scenario
+        err = json.Unmarshal(cusBytes, &stateStub)
+        if err != nil {
+            err = errors.New("Unable to unmarshal JSON data from stub")
+            return nil, err
+            // state is an empty instance of asset state
+        }
+          // Merge partial state updates
+        stateStub, err =t.mergePartialStateCus(stateStub,stateIn)
+        if err != nil {
+            err = errors.New("Unable to merge state")
+            return nil,err
+        }
+    }
+    stateJSON, err := json.Marshal(stateStub)
+    if err != nil {
+        return nil, errors.New("Marshal failed for contract state" + fmt.Sprint(err))
+    }
+    // Get existing state from the stub
+
+
+    // Write the new customer to the ledger
+    err = stub.PutState(cusID, stateJSON)
+    if err != nil {
+        err = errors.New("PUT ledger state failed: "+ fmt.Sprint(err))
+        return nil, err
+    }
+    return nil, nil
+}
+/*********************************  internal: mergePartialState ****************************/
+ func (t *SimpleChaincode) mergePartialState(oldState RoomState, newState RoomState) (RoomState,  error) {
+
+    old := reflect.ValueOf(&oldState).Elem()
+    new := reflect.ValueOf(&newState).Elem()
+    for i := 0; i < old.NumField(); i++ {
+        oldOne:=old.Field(i)
+        newOne:=new.Field(i)
+        if ! reflect.ValueOf(newOne.Interface()).IsNil() {
+            oldOne.Set(reflect.Value(newOne))
+        }
+    }
+    return oldState, nil
+ }
+
+ func (t *SimpleChaincode) mergePartialStateCus(oldState CustomerState, newState CustomerState) (CustomerState,  error) {
+
+    old := reflect.ValueOf(&oldState).Elem()
+    new := reflect.ValueOf(&newState).Elem()
+    for i := 0; i < old.NumField(); i++ {
+        oldOne:=old.Field(i)
+        newOne:=new.Field(i)
+        if ! reflect.ValueOf(newOne.Interface()).IsNil() {
+            oldOne.Set(reflect.Value(newOne))
+        }
+    }
+    return oldState, nil
+ }
