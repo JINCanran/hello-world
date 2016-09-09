@@ -1,0 +1,240 @@
+## Blockchain
+
+### Slide
+http://www.slideshare.net/WeKCo/blockchain
+
+### The Quest for Scalable Blockchain by. Marko Vukolic, IBM Research 
+https://suri.epfl.ch/lib/exe/fetch.php?media=slides:2016:vukolic.pdf
+
+### Blockchain guide(In Chinese)
+A book to introduce blockchain technologies, including the key techniques, algorithms, usage scenarios, and projects. 
+by. Mr. Baohua Yang (He is currently a senior researcher at IBM.)
+https://github.com/yeasy/blockchain_guide
+# including bitcoin, Hyperledger fabric, Ethereum
+# Note: it might be a little old (especially Fabric). 
+
+
+## Hyperledger
+### Slide
+http://www.altoros.com/blog/technical-introduction-to-hyperledger-fabric/
+
+### Official Docs
+http://hyperledger-fabric.readthedocs.io/en/latest/
+https://github.com/hyperledger/fabric
+(Protocol Specification)
+
+### Hyperledger Whitepaper
+
+
+### Paper written by IBM's researcher
+https://www.zurich.ibm.com/dccl/papers/cachin_dccl.pdf
+
+
+
+
+
+
+To: JIN-san
+
+お疲れ様です(Otsukare-sama-desu)。
+
+I send a memo for Setting up fabric environment using containers registered on the DockerHub. 
+Please note that The procedures are probably old. You should also refer to the official docs and try and error. 
+
+## Environment
+* Ubuntu 14.04 on OSSTL
+
+
+## Docker install 
+$ sudo apt-get update
+$ sudo apt-get install apt-transport-https ca-certificates
+$ sudo apt-key adv --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys 58118E89F3A912897C070ADBF76221572C52609D
+
+$ sudo vi /etc/apt/sources.list.d/docker.list
+  # Add following line on the file
+deb https://apt.dockerproject.org/repo ubuntu-trusty main
+
+$ sudo apt-get update
+$ sudo apt-get purge lxc-docker
+$ apt-cache policy docker-engine
+
+$ sudo apt-get update
+$ sudo apt-get install linux-image-extra-$(uname -r)
+$ sudo apt-get install apparmor
+
+$ sudo apt-get update
+$ sudo apt-get -y install docker-engine=1.11.2-0~trusty
+$ sudo service docker start
+$ sudo docker --version
+Docker version 1.11.1, build 5604cbe
+
+## docker exec test
+$ sudo docker run hello-world
+
+## (Optional) create docker group
+$ sudo groupadd docker
+$ sudo usermod -aG docker ubuntu
+
+## Setting docker
+$ sudo su
+$ vi /etc/default/docker
+    (Add following line)
+DOCKER_OPTS="-H tcp://0.0.0.0:2375 -H unix:///var/run/docker.sock"  
+$ restart docker
+
+## Docker compose install (Refer to Offical Site)
+$ sudo -i
+$ curl -L https://github.com/docker/compose/releases/download/1.7.1/docker-compose-Linux-x86_64 > /usr/local/bin/docker-compose
+$ chmod +x /usr/local/bin/docker-compose
+$ docker-compose --version
+docker-compose version 1.7.1, 
+
+
+## Running Fabric on the docker
+* Reference: 
+https://github.com/yeasy/docker-compose-files#hyperledger
+  
+### Download sample of Fabric’s docker-compose.yml from following URL
+* https://github.com/yeasy/docker-compose-files/tree/master/hyperledger
+Please get yml files (docker-compose-files) and put the files on your VM
+
+### install Fabric containers
+$ docker pull yeasy/hyperledger:latest
+$ docker tag yeasy/hyperledger:latest hyperledger/fabric-baseimage:latest
+$ docker pull yeasy/hyperledger-peer:noops
+$ docker pull yeasy/hyperledger-peer:pbft
+$ docker pull yeasy/hyperledger-membersrvc:latest
+
+### Launch Fabric containers
+Move to the folder of docker-compose-files
+#### Case1: security disabled
+$ docker-compose up
+
+#### Case1: security enabled
+$ docker-compose -f docker-compose-with-membersrvc.yml up
+
+Starting hyperledgerdockercomposefiles_membersrvc_1
+Starting hyperledgerdockercomposefiles_vp0_1
+Starting hyperledgerdockercomposefiles_vp1_1
+Starting hyperledgerdockercomposefiles_vp3_1
+Starting hyperledgerdockercomposefiles_vp2_1
+
+「hyperledgerdockercomposefiles_」depends on folder name of docker-compose.yml
+
+# Execute sample chaincode (Please refer to Offical Docs)
+$docker exec -it hyperledgerdockercomposefiles_vp0_1 bash
+(Enter the vp0 container by above command)
+
+root@vp0:/go/bin# peer network login test_user0
+pass: MS9qrN8hFjlE
+
+root@vp0:/go/bin# peer chaincode deploy -u test_user0 -p github.com/hyperledger/fabric/examples/chaincode/go/chaincode_example02 -c '{"Function":"init", "Args": ["a","100", "b", "200"]}'
+peer chaincode invoke -u test_user0 -n f5ddbf58ce7828eafd7d42b0340fc42a6503b8b5cbf7295cc6fe06580cd6f9f5a01fe15a48d58df7ad62c806dabc226174db717639fe846f2d0eba7fa7666974 -c '{"Function": "invoke", "Args": ["a", "b", "10"]}'
+
+
+root@vp0:/go/bin# exit
+
+
+
+
+
+To: JIN-san
+
+I share sample procedure. 
+
+  - install libraries (prerequisite)
+    ```
+    sudo apt-get update
+    sudo apt-get -y install git
+    sudo apt-get -y install gcc
+    sudo apt-get -y install g++
+    sudo apt-get -y install make
+    sudo apt-get -y install unzip
+    sudo apt-get -y install zlib1g-dev
+    sudo apt-get -y install libsnappy-dev
+    sudo apt-get -y install libbz2-dev
+    ```
+
+  - install golang
+    ```
+    cd /tmp
+    wget https://storage.googleapis.com/golang/go1.6.2.linux-amd64.tar.gz
+    sudo tar -C /usr/local -xzf go1.6.2.linux-amd64.tar.gz
+    mkdir ${HOME}/gopath
+    echo 'export GOROOT=/usr/local/go' >> ${HOME}/.bashrc
+    echo 'export GOPATH=${HOME}/gopath' >> ${HOME}/.bashrc
+    echo 'export PATH=${PATH}:/usr/local/go/bin:${GOROOT}/bin' >>  ~/.bashrc
+    source ${HOME}/.bashrc
+
+
+  - Clone of fabric project
+    ```
+    mkdir -p ${GOPATH}/src/github.com/hyperledger
+    cd ${GOPATH}/src/github.com/hyperledger
+    git clone https://github.com/hyperledger/fabric.git
+
+
+
+  - Folder structure of chaincode (asset_management)
+        $GOPATH/src/github.com
+                          /hyperledger
+                                      /fabric
+                          /asset_management
+                                           /app
+                                           /asset_management.go
+                                           /README.md
+                                           /vendor
+                                                  /github.com
+                                                             /hyperledger
+                                                                         /fabric
+                                                             /op
+                                                                /go-logging
+
+    ```
+    cd ${GOPATH}/src/github.com
+    cp -rp hyperledger/fabric/examples/chaincode/go/asset_management ./
+    cd asset_management/
+    mkdir -p vendor/github.com/hyperledger
+    cd vendor/github.com/hyperledger
+    cp -rp ${GOPATH}/src/github.com/hyperledger/fabric/ ./
+    cd ../
+    mkdir op
+    cd op
+    cp -rp ${GOPATH}/src/github.com/hyperledger/fabric/vendor/github.com/op/go-logging ./
+    ```
+  - Build of chaincode
+    ```
+    cd ${GOPATH}/src/github.com/asset_management
+    go build
+
+
+
+
+
+From: 佐藤竜也 / SATO，TATSUYA 
+Sent: Tuesday, August 30, 2016 2:09 PM
+To: ＪＩＮＣＡＮＲＡＮ / JIN，CANRAN
+Subject: [FYI] IoT x blockchain sample application running on the fabric ?
+
+To: JIN-san
+
+After you learn how to use node.js sdk and investigate (IoT x) blockchain applications, 
+why don’t you try to deploy/run following sample on your fabric peer on VM (if we still have time) ? 
+It seem to very simple sample chaincode of IoT application.
+
+https://github.com/ibm-watson-iot/blockchain-samples/blob/master/simple_contract_hyperledger/README.md
+
+
+Best regards. 
+
+
+
+
+
+
+
+
+
+
+
+
